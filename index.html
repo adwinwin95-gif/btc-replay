@@ -266,7 +266,7 @@ select:focus{outline:none}
 <div class="rail">
   <div class="cell">
     <div class="brand"><span class="dot"></span>BTC REPLAY</div>
-    <small>BITSTAMP · 5M REAL</small>
+    <small id="brandSub">BITSTAMP</small>
   </div>
   <div class="cell grow acct" id="rAcct" role="button" tabindex="0" title="계정 전환"><div class="k">계정 · 지갑</div><div class="v" id="rName">—</div></div>
   <div class="cell grow"><div class="k">차트 시각 (UTC)</div><div class="v num" id="rClock">—</div></div>
@@ -404,7 +404,7 @@ select:focus{outline:none}
   <div class="sheet">
     <h1>비트코인 리플레이</h1>
     <p class="lede">
-      Bitstamp BTC/USD 실제 체결 데이터입니다. 분봉은 <b>5분봉 157만 개</b>(2012-01-01 → 2026-11-07),
+      Bitstamp BTC/USD 실제 체결 데이터입니다. 분봉은 <b id="ledeFine">—</b>,
       장기 봉은 1시간봉으로 만듭니다. 날짜와 시각을 고르면 그 시점으로 되돌아가 이후 캔들이 하나씩 다시 열립니다.
     </p>
 
@@ -631,6 +631,10 @@ async function loadJson(path){
 async function loadCoarse(){
   CS = decode(await loadJson('btc_1h.json'));
   DATA_START = CS.start; DATA_END = CS.end;
+  const bars = Math.round((DATA_END-DATA_START)/FINE);
+  $('brandSub').textContent = 'BITSTAMP · '+(FINE/60)+'M REAL';
+  $('ledeFine').textContent = TFNAME[FINE]+'봉 '+Math.round(bars/1e4).toLocaleString('ko-KR')+
+    '만 개 ('+fmtTime(DATA_START,false)+' → '+fmtTime(DATA_END-FINE,false)+')';
 }
 function chunkAt(ts){
   for(let i=0;i<chunks.length;i++){ const c=chunks[i]; if(ts>=c.start && ts<c.end) return c; }
