@@ -310,14 +310,14 @@ select:focus{outline:none}
       </button>
       <button class="pbtn ghost" id="bStep" title="한 봉 진행 (→)">+1봉</button>
       <div class="spacer"></div>
-      <span class="lab">배속</span>
+      <span class="lab">배속</span><span class="lab" id="barDur" style="color:var(--accent)">—</span>
       <div class="seg" id="segSpeed" role="group" aria-label="배속">
-        <button data-s="0.5">0.5×</button>
-        <button data-s="1" aria-pressed="true">1×</button>
-        <button data-s="2">2×</button>
-        <button data-s="5">5×</button>
-        <button data-s="20">20×</button>
-        <button data-s="100">100×</button>
+        <button data-s="1" title="실시간 — 5분봉이면 5분에 걸쳐 그려집니다">1×</button>
+        <button data-s="10" aria-pressed="true">10×</button>
+        <button data-s="60">60×</button>
+        <button data-s="300">300×</button>
+        <button data-s="1800">1.8천×</button>
+        <button data-s="10000">1만×</button>
       </div>
     </div>
   </div>
@@ -497,7 +497,6 @@ const FEE = 0.00008, MMR = 0.005;            // 지정가(메이커) 0.008%
 const FEE_LABEL = '지정가 0.008%';
 const feeOf = notional => notional * FEE;
 const WINDOW = 420, WARM = 260, SKIP = 60;   // 표시 봉 / 지표 워밍업 / 좌측 버림
-const MS_PER_BAR = 850;
 /* 분봉 원본의 해상도와 경로는 빌드가 정한다 (웹=1분, 오프라인 단일파일=5분) */
 const SRCDEF = (window.__FINE && window.__FINE.step) ? window.__FINE : {step:60, path:'fine1m/btc_1m_'};
 const FINE = SRCDEF.step, FINEPATH = SRCDEF.path, COARSE = 3600;
@@ -516,7 +515,7 @@ let lines = {}, markers = [], ready = false;
 let DATA_START = 0, DATA_END = 0;
 
 const S = {
-  now:0, tf:900, speed:1, playing:false, loading:false,
+  now:0, tf:900, speed:10, playing:false, loading:false,
   bal:10000, start:10000, pos:null, trades:[], eq:[],
   peak:10000, mdd:0, liqs:0, blind:false, t0:0, lev:10, over:false,
   showEma:true, showCloud:true, mmode:'cross', qtyLock:false, hidePrice:false, anchor:0, fees:0
@@ -531,6 +530,12 @@ const DK = () => (S.hidePrice && S.anchor > 0) ? 100/S.anchor : 1;
 const dPrice = v => v*DK();
 const rQty = q => q*DK();          // 표시 수량 -> 실제 수량
 const UNIT = () => S.hidePrice ? '계약' : 'BTC';
+function fmtDur(sec){
+  if(sec < 1)    return sec.toFixed(2)+'초';
+  if(sec < 60)   return (sec<10 ? sec.toFixed(1) : Math.round(sec))+'초';
+  if(sec < 3600) return (sec/60).toFixed(sec<600?1:0)+'분';
+  return (sec/3600).toFixed(1)+'시간';
+}
 const fmtPx = v => S.hidePrice
   ? dPrice(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'pt'
   : '$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -938,6 +943,11 @@ function setMarks(){
 }
 
 /* ---------- replay ---------- */
+function afterAdvance(){
+  if(S.tf < COARSE && !fineReady(S.now)) kickLoad();
+  pushEq(); sync(); renderHud(); updatePos();
+}
+/* +1봉 버튼·→ 키: 한 봉을 통째로 건너뛴다 */
 function advance(bars){
   if(S.over || S.loading) return;
   const T = S.tf;
@@ -946,8 +956,18 @@ function advance(bars){
     advanceTo(S.now + T);
     if(S.over) break;
   }
-  if(S.tf < COARSE && !fineReady(S.now)) kickLoad();
-  pushEq(); sync(); renderHud(); updatePos();
+  afterAdvance();
+}
+/* 재생 중에는 원본 해상도만큼씩 흘려서 봉이 자라는 모습을 보여준다 */
+function stepSec(){
+  const b = barAt(S.now);
+  return Math.min(S.tf, b ? b.step : COARSE);
+}
+function advanceSim(sec){
+  if(S.over || S.loading) return false;
+  if(S.now + sec > DATA_END){ endSession('데이터의 끝에 도달했습니다'); return false; }
+  advanceTo(S.now + sec);
+  return !S.over;
 }
 function advanceTo(target){
   while(S.now < target){
@@ -1186,13 +1206,14 @@ function renderHud(){
     $('rPriceK').textContent = '현재가';
     $('rPrice').textContent = fmtPx(px);
   }
-  $('rClock').textContent = S.blind ? '••••-••-•• ••:••' : fmtTime(curGt(), S.tf<86400);
+  $('rClock').textContent = S.blind ? '••••-••-•• ••:••' : fmtTime(S.now, S.tf<86400);
   $('rEquity').textContent = fmtUsd(eq,2);
   const ret = (eq/S.start-1)*100, r = $('rRet');
   r.textContent = (ret>=0?'+':'')+ret.toFixed(2)+'%';
   r.className = 'v num '+(Math.abs(ret)<0.005?'flat':ret>0?'up':'down');
   const sec = S.now-S.t0, days = Math.floor(sec/86400), hrs = Math.floor(sec/3600);
   $('tagProg').textContent = '경과 '+(days>=1?days+'일':hrs>=1?hrs+'시간':Math.floor(sec/60)+'분');
+  $('barDur').textContent = '봉당 '+fmtDur(S.tf/S.speed);
   $('bStep').disabled = S.playing || S.over;
   $('bLong').disabled = S.over; $('bShort').disabled = S.over;
   const p = S.pos;
@@ -1292,11 +1313,19 @@ let raf=null, acc=0, last=0;
 function tick(ts){
   if(!S.playing){ raf=null; return; }
   if(!last) last = ts;
-  acc += ts-last; last = ts;
-  const per = MS_PER_BAR/S.speed;
-  let guard = 0;
-  while(acc>=per && guard<80){ acc-=per; advance(1); guard++; if(S.over||S.loading) break; }
-  if(guard>=80) acc = 0;
+  let dt = ts-last; last = ts;
+  if(dt > 500) dt = 500;                  // 탭에서 돌아왔을 때 한꺼번에 튀지 않도록
+  acc += dt/1000 * S.speed;               // 흘려보낼 시뮬레이션 초
+  const step = stepSec();
+  let guard = 0, moved = false;
+  while(acc >= step && guard < 600){
+    acc -= step; guard++;
+    if(!advanceSim(step)) break;
+    moved = true;
+    if(S.loading) break;
+  }
+  if(guard >= 600) acc = 0;
+  if(moved) afterAdvance();
   raf = S.playing ? requestAnimationFrame(tick) : null;
 }
 function setPlaying(v){
@@ -1391,7 +1420,10 @@ $('segInd').onclick = e => {
   }
   applyIndVis(); schedulePaint();
 };
-$('segSpeed').onclick = e => { const b=e.target.closest('button'); if(!b) return; S.speed=+b.dataset.s; syncSeg('segSpeed','s',b.dataset.s); acc=0; };
+$('segSpeed').onclick = e => {
+  const b = e.target.closest('button'); if(!b) return;
+  S.speed = +b.dataset.s; syncSeg('segSpeed','s',b.dataset.s); acc = 0; renderHud();
+};
 $('bPlay').onclick = ()=>setPlaying(!S.playing);
 $('bStep').onclick = ()=>{ if(!S.playing && !S.over) advance(1); };
 $('bLong').onclick = ()=>placeOrder('long');
